@@ -1,0 +1,118 @@
+name: BEUP Results Monitor
+
+on:
+  schedule:
+    # Standard monitoring every 5 minutes
+    - cron: '*/5 * * * *'
+    # Intensive monitoring during business hours (India time: 9 AM - 6 PM = 3:30 AM - 12:30 PM UTC)
+    - cron: '*/2 3-12 * * 1-5'
+  
+  workflow_dispatch:
+    inputs:
+      notify_start:
+        description: 'Send start notification'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Send startup notification (if manual)
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.notify_start == 'true'
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        python -c "
+        import asyncio, aiohttp, json, os
+        from datetime import datetime
+        
+        async def notify():
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            if webhook_url:
+                payload = {
+                    'embeds': [{
+                        'title': '🔄 Manual Monitor Check Started',
+                        'color': 0x00aaff,
+                        'timestamp': datetime.utcnow().isoformat()
+                    }]
+                }
+                async with aiohttp.ClientSession() as session:
+                    await session.post(webhook_url, json=payload)
+        
+        asyncio.run(notify())
+        "
+        
+    - name: Run BEUP monitoring
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        GITHUB_ACTIONS: 'true'
+        GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        GITHUB_WORKFLOW: ${{ github.workflow }}
+      run: |
+        echo "🔍 Starting BEUP Results Monitor..."
+        echo "Run #$GITHUB_RUN_NUMBER at $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        python discord_monitor.py
+        echo "✅ Monitor check completed"
+        
+    - name: Handle monitoring failure
+      if: failure()
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        python -c "
+        import asyncio, aiohttp, json, os
+        from datetime import datetime
+        
+        async def notify_failure():
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            if webhook_url:
+                payload = {
+                    'embeds': [{
+                        'title': '⚠️ Monitor Check Failed',
+                        'description': 'There was an issue with the monitoring script',
+                        'color': 0xff6600,
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'fields': [
+                            {
+                                'name': 'Workflow Run',
+                                'value': '#${{ github.run_number }}',
+                                'inline': True
+                            },
+                            {
+                                'name': 'Repository',
+                                'value': '${{ github.repository }}',
+                                'inline': True
+                            }
+                        ]
+                    }]
+                }
+                async with aiohttp.ClientSession() as session:
+                    await session.post(webhook_url, json=payload)
+        
+        asyncio.run(notify_failure())
+        " || echo "Failed to send failure notification"

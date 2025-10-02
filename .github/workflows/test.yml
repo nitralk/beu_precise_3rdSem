@@ -1,0 +1,6 @@
+curl -X POST "YOUR_DISCORD_WEBHOOK_URL" \
+-H "Content-Type: application/json" \
+-d '{
+  "content": "🧪 Direct test from terminal - webhook working!",
+  "username": "Test Bot"
+}'

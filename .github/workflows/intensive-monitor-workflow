@@ -1,0 +1,150 @@
+name: Intensive BEUP Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_minutes:
+        description: 'Duration of intensive monitoring (minutes)'
+        required: true
+        default: '60'
+        type: string
+      check_interval:
+        description: 'Check interval (minutes)'
+        required: true
+        default: '1'
+        type: choice
+        options:
+        - '1'
+        - '2'
+        - '5'
+
+jobs:
+  intensive-monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 3 hours max
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Send start notification
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        python -c "
+        import asyncio
+        import aiohttp
+        import json
+        import os
+        from datetime import datetime
+        
+        async def send_start_notification():
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            if not webhook_url:
+                return
+                
+            payload = {
+                'content': '🚀 **Intensive Monitoring Started**',
+                'embeds': [{
+                    'title': '⚡ High-Frequency BEUP Monitor Active',
+                    'description': f'Monitoring every ${{ github.event.inputs.check_interval }} minutes for ${{ github.event.inputs.duration_minutes }} minutes',
+                    'color': 0x00ff00,
+                    'timestamp': datetime.utcnow().isoformat(),
+                    'fields': [
+                        {
+                            'name': '⏱️ Check Interval',
+                            'value': '${{ github.event.inputs.check_interval }} minutes',
+                            'inline': True
+                        },
+                        {
+                            'name': '⏳ Total Duration',
+                            'value': '${{ github.event.inputs.duration_minutes }} minutes',
+                            'inline': True
+                        }
+                    ]
+                }],
+                'username': 'BEUP Intensive Monitor'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(webhook_url, json=payload) as response:
+                    print(f'Start notification sent: {response.status}')
+        
+        asyncio.run(send_start_notification())
+        "
+        
+    - name: Run intensive monitoring
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        GITHUB_ACTIONS: true
+        INTENSIVE_MODE: true
+        DURATION_MINUTES: ${{ github.event.inputs.duration_minutes }}
+        CHECK_INTERVAL_MINUTES: ${{ github.event.inputs.check_interval }}
+      run: |
+        echo "Starting intensive monitoring..."
+        echo "Duration: $DURATION_MINUTES minutes"
+        echo "Check interval: $CHECK_INTERVAL_MINUTES minutes"
+        
+        # Calculate end time
+        END_TIME=$(($(date +%s) + $DURATION_MINUTES * 60))
+        CHECK_INTERVAL_SECONDS=$(($CHECK_INTERVAL_MINUTES * 60))
+        
+        while [ $(date +%s) -lt $END_TIME ]; do
+          echo "Running check at $(date -u)"
+          python discord_monitor.py
+          
+          # Calculate remaining time
+          REMAINING=$((END_TIME - $(date +%s)))
+          if [ $REMAINING -gt $CHECK_INTERVAL_SECONDS ]; then
+            echo "Waiting $CHECK_INTERVAL_MINUTES minutes until next check..."
+            sleep $CHECK_INTERVAL_SECONDS
+          else
+            echo "Monitoring period ending..."
+            break
+          fi
+        done
+        
+    - name: Send completion notification
+      if: always()
+      env:
+        DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      run: |
+        python -c "
+        import asyncio
+        import aiohttp
+        import json
+        import os
+        from datetime import datetime
+        
+        async def send_completion_notification():
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL')
+            if not webhook_url:
+                return
+                
+            payload = {
+                'content': '🏁 **Intensive Monitoring Completed**',
+                'embeds': [{
+                    'title': '✅ Intensive Monitor Session Ended',
+                    'description': 'Returning to standard monitoring schedule',
+                    'color': 0x0099ff,
+                    'timestamp': datetime.utcnow().isoformat()
+                }],
+                'username': 'BEUP Intensive Monitor'
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(webhook_url, json=payload) as response:
+                    print(f'Completion notification sent: {response.status}')
+        
+        asyncio.run(send_completion_notification())
+        "
