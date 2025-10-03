@@ -1,0 +1,85 @@
+name: Ultra Monitor B
+
+on:
+  schedule:
+    - cron: '* * * * *'  # Every minute, 5-second offset in Python
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt
+      - name: Ultra-fast monitoring with offset
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GITHUB_ACTIONS: 'true'
+          MONITOR_ID: 'B'
+        run: |
+          python -c "
+          import asyncio
+          import time
+          import aiohttp
+          import os
+          from datetime import datetime
+          
+          DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
+          URL = 'https://results.beup.ac.in/BTech5th Sem2024_B2022Results.aspx'
+          MONITOR_ID = os.getenv('MONITOR_ID', 'B')
+          
+          async def quick_check():
+              try:
+                  # Start with 5-second offset
+                  await asyncio.sleep(5)
+                  
+                  async with aiohttp.ClientSession() as session:
+                      # Check 6 times at 5, 15, 25, 35, 45, 55 seconds
+                      for i in range(6):
+                          start_time = time.time()
+                          
+                          try:
+                              async with session.get(URL, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                                  status = 'UP' if resp.status == 200 else 'DOWN'
+                              
+                              # Send update if DOWN or every 3rd check
+                              if status == 'DOWN' or i % 3 == 0:
+                                  timestamp = datetime.now().strftime('%H:%M:%S')
+                                  payload = {
+                                      'content': f'🔍[{MONITOR_ID}] {status} [{timestamp}] (Check {i+1}/6)',
+                                      'username': f'Ultra Monitor {MONITOR_ID}'
+                                  }
+                                  
+                                  try:
+                                      async with session.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5) as discord_resp:
+                                          if discord_resp.status == 429:
+                                              await asyncio.sleep(1)
+                                  except:
+                                      pass
+                                      
+                          except asyncio.TimeoutError:
+                              timestamp = datetime.now().strftime('%H:%M:%S')
+                              payload = {
+                                  'content': f'⏱️[{MONITOR_ID}] TIMEOUT [{timestamp}] (Check {i+1}/6)',
+                                  'username': f'Ultra Monitor {MONITOR_ID}'
+                              }
+                              try:
+                                  async with session.post(DISCORD_WEBHOOK_URL, json=payload, timeout=5) as discord_resp:
+                                      pass
+                              except:
+                                  pass
+                          
+                          elapsed = time.time() - start_time
+                          wait_time = max(0, 10 - elapsed)
+                          if i < 5:
+                              await asyncio.sleep(wait_time)
+                              
+              except Exception as e:
+                  print(f'Monitor {MONITOR_ID} error: {e}')
+          
+          asyncio.run(quick_check())
+          "
