@@ -6,13 +6,14 @@ import zipfile
 from io import BytesIO
 from datetime import datetime
 from typing import Optional, List
+import pytz
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
 URL = 'https://results.beup.ac.in/BTech3rdSem2024_B2023Results.aspx'
 
 CHECK_INTERVAL = 2
 CONTINUOUS_DURATION = 900
-SCHEDULED_INTERVAL = 5
+SCHEDULED_INTERVAL = 6
 
 RESULT_URLS = [
     "https://results.beup.ac.in/ResultsBTech3rdSem2024_B2022Pub.aspx?Sem=III&RegNo=22156148040",
@@ -63,15 +64,19 @@ RESULT_URLS = [
     "https://results.beup.ac.in/ResultsBTech3rdSem2024_B2023Pub.aspx?Sem=III&RegNo=23152148023"
 ]
 
-
-
-
 class DiscordMonitor:
     def __init__(self):
         self.last_status: Optional[str] = None
         self.last_scheduled_time: float = 0
         self.rate_limit_remaining = 5
         self.rate_limit_reset = 0
+        self.ist_timezone = pytz.timezone('Asia/Kolkata')
+
+    def get_indian_time(self) -> str:
+        """Get current Indian time in IST timezone using pytz"""
+        utc_now = datetime.now(pytz.utc)
+        ist_now = utc_now.astimezone(self.ist_timezone)
+        return ist_now.strftime("%d-%m-%Y %I:%M:%S %p IST")
 
     async def send_discord_message(self, content: str, username: str = "BEUP Monitor") -> bool:
         if not DISCORD_WEBHOOK_URL:
@@ -178,12 +183,17 @@ class DiscordMonitor:
                     await self.send_discord_message("📅 Scheduled update: Website is UP")
                     self.last_scheduled_time = time.time()
                 else:
-                    await self.send_discord_message("🔴 WEBSITE IS DOWN")
+                    current_time = self.get_indian_time()
+                    await self.send_discord_message(f"🔴 WEBSITE IS DOWN - {current_time}")
                     self.last_scheduled_time = now
 
             elif scheduled_due:
                 emoji = "✅" if current == "UP" else "🔴"
-                await self.send_discord_message(f"{emoji} Scheduled update: Website is {current}")
+                if current == "DOWN":
+                    current_time = self.get_indian_time()
+                    await self.send_discord_message(f"{emoji} Scheduled update: Website is {current} - {current_time}")
+                else:
+                    await self.send_discord_message(f"{emoji} Scheduled update: Website is {current}")
                 self.last_scheduled_time = now
 
             self.last_status = current
